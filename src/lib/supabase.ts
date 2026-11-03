@@ -1,3 +1,4 @@
+
 export const supabase: any = {
   from: (table: string) => ({
     select: () => {
