@@ -1,38 +1,63 @@
-
-export const supabase: any = {
-  from: (table: string) => ({
-    select: () => {
-      try {
-        const d = JSON.parse(localStorage.getItem(table) || '[]')
-        return Promise.resolve({ data: d, error: null })
-      } catch { return Promise.resolve({ data: [], error: null }) }
-    },
-    insert: (vals: any) => {
-      const cur = JSON.parse(localStorage.getItem(table) || '[]')
-      const arr = Array.isArray(vals) ? vals : [vals]
-      const news = arr.map((v: any) => ({ id: Date.now().toString(), ...v }))
-      localStorage.setItem(table, JSON.stringify([...cur, ...news]))
-      return Promise.resolve({ data: news, error: null })
-    },
-    update: (vals: any) => ({
-      eq: (c: string, id: any) => {
-        const cur = JSON.parse(localStorage.getItem(table) || '[]')
-        const upd = cur.map((x: any) => x.id === id ? { ...x, ...vals } : x)
-        localStorage.setItem(table, JSON.stringify(upd))
-        return Promise.resolve({ data: upd, error: null })
-      }
-    }),
-    delete: () => ({
-      eq: (c: string, id: any) => {
-        const cur = JSON.parse(localStorage.getItem(table) || '[]')
-        const fil = cur.filter((x: any) => x.id !== id)
-        localStorage.setItem(table, JSON.stringify(fil))
-        return Promise.resolve({ data: null, error: null })
-      }
-    })
-  }),
-  auth: {
-    getSession: () => Promise.resolve({ data: { session: null }, error: null }),
-    onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } })
-  }
+type AnyRow = any;
+function getTable(t: string): AnyRow[] {
+  try { return JSON.parse(localStorage.getItem(t) || '[]'); } catch { return []; }
 }
+function setTable(t: string, v: AnyRow[]) {
+  localStorage.setItem(t, JSON.stringify(v));
+}
+function makeQuery(t: string) {
+  const query: any = {
+    _table: t,
+    _filters: [] as any[],
+    eq(col: string, val: any) {
+      query._filters.push({col, val});
+      return query;
+    },
+    select() { return query; },
+    order() { return query; },
+    limit() { return query; },
+    single() {
+      let data = getTable(t);
+      for (const f of query._filters) data = data.filter((r:any)=>r[f.col]==f.val);
+      return Promise.resolve({ data: data[0] || null, error: null });
+    },
+    then(resolve: any) {
+      let data = getTable(t);
+      for (const f of query._filters) data = data.filter((r:any)=>r[f.col]==f.val);
+      resolve({ data, error: null });
+    }
+  };
+  query.insert = (vals: any) => {
+    const arr = Array.isArray(vals) ? vals : [vals];
+    const cur = getTable(t);
+    const withIds = arr.map((v:any)=>({ id: (Date.now()+Math.random()).toString(), created_at: new Date().toISOString(), ...v }));
+    setTable(t, [...cur, ...withIds]);
+    return Promise.resolve({ data: withIds, error: null });
+  };
+  query.update = (vals: any) => {
+    return {
+      eq(col: string, val: any) {
+        const cur = getTable(t);
+        const upd = cur.map((r:any)=> r[col]==val ? {...r, ...vals} : r);
+        setTable(t, upd);
+        return Promise.resolve({ data: upd, error: null });
+      }
+    };
+  };
+  query.delete = () => {
+    return {
+      eq(col: string, val: any) {
+        const cur = getTable(t);
+        const fil = cur.filter((r:any)=> r[col]!=val);
+        setTable(t, fil);
+        return Promise.resolve({ data: null, error: null });
+      }
+    };
+  };
+  return query;
+}
+export const supabase: any = {
+  from: (t: string) => makeQuery(t),
+  auth: { getUser: () => Promise.resolve({ data: { user: null }, error: null }) },
+  storage: { from: () => ({ upload: () => Promise.resolve({ data: null, error: null }), getPublicUrl: () => ({ data: { publicUrl: '' } }) }) }
+};
